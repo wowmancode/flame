@@ -324,7 +324,7 @@ fun ColorsTab(vm: FlameViewModel) {
     val f = vm.flame
     SectionTitle("Current gradient")
     PaletteStrip(f.palette)
-    ValueSlider("Shift", vm.paletteShift.toDouble(), 0.0..255.0, { v -> vm.setPaletteShift(v.toInt()) }, integer = true)
+    ValueSlider("Shift", vm.paletteShift.toDouble(), 0.0..255.0, { v -> vm.changePaletteShift(v.toInt()) }, integer = true)
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         FilledTonalButton(onClick = { vm.setPalette(Palettes.random(java.util.Random())) }) { Icon(Icons.Filled.Casino, null); Text("Random") }
         OutlinedButton(onClick = vm::reversePalette) { Text("Reverse") }

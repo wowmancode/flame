@@ -195,7 +195,7 @@ class FlameViewModel(app: Application) : AndroidViewModel(app) {
     // ---- palette
     fun setPalette(p: IntArray) = edit { paletteBase = p.copyOf(); paletteShift = 0; it.palette = p.copyOf() }
 
-    fun setPaletteShift(s: Int) = edit(coalesce = true) { paletteShift = s; it.palette = Palettes.shifted(paletteBase, s) }
+    fun changePaletteShift(s: Int) = edit(coalesce = true) { paletteShift = s; it.palette = Palettes.shifted(paletteBase, s) }
 
     fun reversePalette() = edit { paletteBase = Palettes.reversed(paletteBase); it.palette = Palettes.shifted(paletteBase, paletteShift) }
 
