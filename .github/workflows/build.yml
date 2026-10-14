@@ -23,7 +23,7 @@ jobs:
         if: failure()
         run: |
           # Surface compiler errors as annotations so they are visible without downloading logs
-          grep -E "^e: |What went wrong|^> |error:" build.log | head -40 > errors.txt || true
+          grep -E "^e: |What went wrong|error:|Exception|^  > " build.log | grep -v "> Task" | head -40 > errors.txt || true
           msg=$(sed 's/%/%25/g' errors.txt | sed ':a;N;$!ba;s/\n/%0A/g')
           echo "::error title=Build errors::${msg}"
       - uses: actions/upload-artifact@v4
