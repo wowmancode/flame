@@ -1,20 +1,20 @@
 # FlameDroid
 
-A fractal flame editor for Android, built around a Kotlin port of **89 variations from JWildfire**.
+A fractal flame editor for Android, built around a Kotlin port of **193 variations from JWildfire**.
 It opens and saves JWildfire / Apophysis `.flame` files, so you can move flames between your phone and desktop.
 
-![All 89 variations](docs/variations.png)
+![Variation test renders](docs/variations.png)
 
 ## Features
 
-- **89 JWildfire variations**, ported line by line from JWildfire's source, with the same names and parameter names
+- **193 JWildfire variations**, ported line by line from JWildfire's source, with the same names and parameter names
 - Live progressive preview; pinch, drag and twist to move the camera
 - Transform editor: JWildfire-style triangle view (drag to move), rotate, scale, flip, pre and post affine, exact coefficients
 - Final transform, weights, color, color speed (symmetry), opacity, xaos
 - Per-variation amount and parameter sliders; tap any value to type an exact number; dice randomizes parameters
 - 18 built-in gradients, random gradients, shift and reverse, background color
 - Tone mapping: brightness, gamma, gamma threshold, vibrancy, contrast
-- **New fractal** screen: pick from a gallery of random fractals in any style, or start from
+- **New blank fractal** button to build from scratch, and a **New fractal** screen: pick from a gallery of random fractals in any style, or start from
   10 templates (Sierpinski, Fern, Dragon, Julia spiral, Galaxy, Kaleidoscope, Hyperbolic tiling, ...)
 - Random generator styles: Classic, Symmetric, Spiral, Julians, Bubbles, Galaxy, Kaleidoscope, Tiles, Crystal; plus "mutate"
 - Custom gradient editor: tap to add color points, tap a point for an HSV color picker
@@ -32,6 +32,17 @@ It opens and saves JWildfire / Apophysis `.flame` files, so you can move flames 
 `split` `stripes` `wedge` `whorl` `waves2` `exp` `log` `sin` `cos` `tan` `sinh` `cosh` `tanh` `elliptic`
 `hemisphere` `bubble2` `spherical3D` `auger` `flux` `splits` `bwraps` `collideoscope` `curve` `foci` `glynnia`
 `hypertile` `checks` `circlize`
+
+Batch 2: `mobius` `edisc` `eJulia` `ePush` `eRotate` `eScale` `cpow` `cpow2` `cpow3` `rational3` `sec` `csc` `cot`
+`sech` `csch` `coth` `atan` `sigmoid` `phoenix_julia` `juliac` `julian2` `npolar` `murl` `murl2` `hypershift`
+`hypershift2` `hypertile1` `hypertile2` `cardioid` `cannabiscurve_wf` `cloverleaf_wf` `rose_wf` `lissajous`
+`spirograph` `epispiral` `petal` `xheart` `squarize` `squish` `circlize2` `loonie2` `scry2` `asteria` `roundspher`
+`twoface` `wedge_sph` `wdisc` `hole` `target` `circus` `layered_spiral` `panorama1` `panorama2` `bipolar2` `ortho`
+`deltaA` `fourth` `boarders` `boarders2` `modulus` `intersection` `tile_log` `waffle` `lazyTravis` `trade` `eclipse`
+`flipcircle` `flipy` `bent2` `chunk` `corners` `kaleidoscope` `gdoffs` `shift` `shredded` `popcorn2` `waves3`
+`waves4` `waves42` `waves22` `waves23` `pulse` `sinusgrid` `stwin` `tancos` `rippled` `funnel` `oscilloscope`
+`mcarpet` `cylinder2` `svf` `rays1` `rays2` `rays3` `blur_circle` `blur_zoom` `blur_linear` `blur_pixelize`
+`circleblur` `sineblur` `vogel` `glynnSim1` `glynnSim2` `glynnSim3`
 
 When you open a `.flame` file that uses a variation not in this list, the app tells you which ones it skipped.
 

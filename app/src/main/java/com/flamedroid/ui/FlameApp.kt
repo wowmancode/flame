@@ -28,6 +28,7 @@ import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Casino
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.NoteAdd
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material3.AlertDialog
@@ -100,14 +101,12 @@ fun FlameApp(vm: FlameViewModel) {
         snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
             TopAppBar(
-                title = {
-                    Text(vm.flame.name, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                        style = MaterialTheme.typography.titleMedium)
-                },
+                title = {},
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
                 actions = {
                     IconButton(onClick = vm::undo, enabled = vm.canUndo) { Icon(Icons.AutoMirrored.Filled.Undo, "Undo") }
                     IconButton(onClick = vm::redo, enabled = vm.canRedo) { Icon(Icons.AutoMirrored.Filled.Redo, "Redo") }
+                    IconButton(onClick = vm::newBlank) { Icon(Icons.Filled.NoteAdd, "New blank fractal") }
                     IconButton(onClick = { showNew = true }) { Icon(Icons.Filled.AutoAwesome, "New fractal") }
                     Box {
                         IconButton(onClick = { randomMenu = true }) { Icon(Icons.Filled.Casino, "Random flame") }
@@ -132,6 +131,7 @@ fun FlameApp(vm: FlameViewModel) {
                             })
                             HorizontalDivider()
                             DropdownMenuItem(text = { Text("Auto-fit camera") }, onClick = { menu = false; vm.autoFit() })
+                            DropdownMenuItem(text = { Text("New blank fractal") }, onClick = { menu = false; vm.newBlank() })
                             DropdownMenuItem(text = { Text("New fractal…") }, onClick = { menu = false; showNew = true })
                             DropdownMenuItem(text = { Text("Mutate (small random change)") },
                                 leadingIcon = { Icon(Icons.Filled.Shuffle, null) }, onClick = { menu = false; vm.mutate() })
@@ -221,6 +221,15 @@ private fun Preview(vm: FlameViewModel, modifier: Modifier) {
                     modifier = Modifier.fillMaxSize()
                 )
             } ?: CircularProgressIndicator(Modifier.align(Alignment.Center).size(32.dp))
+        }
+        if (f.xforms.isEmpty()) {
+            Text(
+                "Blank canvas\nOpen Transforms and tap Add,\nthen add variations to shape it",
+                color = Color.White.copy(alpha = 0.7f),
+                style = MaterialTheme.typography.bodyMedium,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                modifier = Modifier.align(Alignment.Center)
+            )
         }
         Text(
             "${fmt(vm.previewSpp.toDouble())} spp",

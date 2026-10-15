@@ -183,13 +183,24 @@ class FlameViewModel(app: Application) : AndroidViewModel(app) {
 
     fun mutate() = replaceFlame(RandomFlame.mutate(flame))
 
+    /** A completely empty fractal (no transforms) to build from scratch, keeping the current aspect. */
+    fun newBlank() {
+        val f = Flame()
+        f.name = "Untitled"
+        f.width = flame.width; f.height = flame.height
+        f.pixelsPerUnit = f.width / 5.0 // about -2.5..2.5 across
+        f.palette = flame.palette.copyOf()
+        replaceFlame(f)
+        message = "Blank canvas — open Transforms and tap Add to start"
+    }
+
     fun autoFit() = edit { RandomFlame.autoFit(it, 7) }
 
     // ---- xforms
     fun addXForm() = edit {
         val x = XForm()
         x.scale(0.5)
-        x.move(Math.random() - 0.5, Math.random() - 0.5)
+        if (it.xforms.isEmpty()) x.move(0.5, 0.0) else x.move(Math.random() - 0.5, Math.random() - 0.5)
         x.addVariation("linear", 1.0)
         it.xforms += x
         it.normalizeXaos()
@@ -598,7 +609,7 @@ class FlameViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun loadAutosave(): Flame? = try {
         val f = File(getApplication<Application>().filesDir, "autosave.flame")
-        if (f.exists()) FlameXml.parse(f.readText()).flames.firstOrNull()?.takeIf { it.xforms.isNotEmpty() } else null
+        if (f.exists()) FlameXml.parse(f.readText()).flames.firstOrNull() else null
     } catch (_: Exception) { null }
 
     // Must come after all property initializers (they run in declaration order).

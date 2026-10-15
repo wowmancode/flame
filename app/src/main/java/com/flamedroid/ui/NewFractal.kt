@@ -23,6 +23,7 @@ import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.NoteAdd
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -87,6 +88,12 @@ fun NewFractalScreen(vm: FlameViewModel, onClose: () -> Unit) {
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                     modifier = Modifier.padding(horizontal = 12.dp)
                 ) {
+                    item(span = { GridItemSpan(maxLineSpan) }) {
+                        FilledTonalButton(
+                            onClick = { vm.stopGallery(); vm.newBlank(); onClose() },
+                            modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+                        ) { Icon(Icons.Filled.NoteAdd, null); Text("  Start blank — build from scratch") }
+                    }
                     item(span = { GridItemSpan(maxLineSpan) }) { SectionTitle("Random — tap one to open it") }
                     item(span = { GridItemSpan(maxLineSpan) }) {
                         Column {

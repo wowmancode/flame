@@ -1194,6 +1194,7 @@ object Variations {
             ::Hemisphere, ::Bubble2, ::Spherical3D, ::Auger, ::Flux, ::Splits, ::Bwraps, ::Collideoscope,
             ::Curve, ::Foci, ::Glynnia, ::Hypertile, ::Checks, ::Circlize
         ).forEach { reg(it) }
+        batch2Variations.forEach { reg(it) }
     }
 
     val names: List<String> get() = factories.keys.toList()
@@ -1213,5 +1214,5 @@ object Variations {
         "stripes", "wedge", "whorl", "waves2", "exp", "log", "sin", "cos", "tan", "sinh", "cosh", "tanh",
         "elliptic", "hemisphere", "auger", "flux", "splits", "bwraps", "collideoscope", "curve", "foci",
         "glynnia", "hypertile", "circlize", "loonie", "popcorn", "waves", "fan", "rings", "blade", "twintrian"
-    ).filter { factories.containsKey(it) }
+    ).plus(batch2RandomFriendly).filter { factories.containsKey(it) }
 }

@@ -117,6 +117,13 @@ fun TransformsTab(vm: FlameViewModel) {
         OutlinedButton(onClick = vm::deleteXForm) { Icon(Icons.Filled.Delete, null) }
         OutlinedButton(onClick = vm::toggleFinal) { Text(if (vm.flame.finalXform == null) "+ Final" else "− Final") }
     }
+    if (vm.flame.xforms.isEmpty()) {
+        Text("No transforms yet. Tap Add to create one — a fractal usually needs two or more. " +
+                "Then use the Variations tab to bend them.",
+            style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 12.dp))
+        return
+    }
     val x = vm.selectedXForm() ?: return
     val isFinal = vm.selected == -1
 
@@ -264,7 +271,11 @@ fun VariationsTab(vm: FlameViewModel) {
     @Suppress("UNUSED_VARIABLE") val rev = vm.revision
     var picking by remember { mutableStateOf(false) }
     XFormSelector(vm)
-    val x = vm.selectedXForm() ?: return
+    val x = vm.selectedXForm() ?: run {
+        Text("Add a transform in the Transforms tab first.", style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 12.dp))
+        return
+    }
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
         FilledTonalButton(onClick = { picking = true }) { Icon(Icons.Filled.Add, null); Text("Add variation") }
         Spacer(Modifier.weight(1f))
