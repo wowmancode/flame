@@ -11,15 +11,21 @@ object RandomFlame {
 
     enum class Style(val label: String) {
         MIXED("Mixed"), CLASSIC("Classic"), SYMMETRIC("Symmetric"), SPIRAL("Spiral"), JULIA("Julians"),
-        BUBBLES("Bubbles"), GALAXY("Galaxy"), KALEIDO("Kaleidoscope"), TILES("Tiles"), CRYSTAL("Crystal")
+        BUBBLES("Bubbles"), GALAXY("Galaxy"), KALEIDO("Kaleidoscope"), TILES("Tiles"), CRYSTAL("Crystal"),
+        /** Anything goes: any variation, every setting random. Not part of MIXED. */
+        PURE("Pure random")
     }
 
+    /** Curated styles that MIXED picks from. */
+    private val curated get() = Style.entries.filter { it != Style.MIXED && it != Style.PURE }
+
     fun generate(style: Style = Style.MIXED, width: Int = 800, height: Int = 600, seed: Long = System.nanoTime()): Flame {
+        if (style == Style.PURE) return generatePure(width, height, seed)
         val rnd = Random(seed)
         var best: Flame? = null
         var bestScore = -1.0
         repeat(14) {
-            val s = if (style == Style.MIXED) Style.values()[1 + rnd.nextInt(Style.values().size - 1)] else style
+            val s = if (style == Style.MIXED) curated[rnd.nextInt(curated.size)] else style
             val f = build(s, rnd)
             f.width = width; f.height = height
             if (!autoFit(f, rnd.nextLong())) return@repeat
@@ -39,6 +45,96 @@ object RandomFlame {
     }
 
     private fun pickVar(r: Random) = Variations.randomFriendly[r.nextInt(Variations.randomFriendly.size)]
+
+    // ------------------------------------------------------------------ pure random
+
+    /**
+     * Pure random: random number of transforms, each with random affine coefficients and
+     * 1-4 variations drawn from the full list, every parameter set to a random value.
+     * The only filtering is that the result must not diverge or render empty; otherwise
+     * nothing is steered toward "nice" looking results.
+     */
+    fun generatePure(width: Int = 800, height: Int = 600, seed: Long = System.nanoTime()): Flame {
+        val rnd = Random(seed)
+        var fallback: Flame? = null
+        repeat(40) {
+            val f = buildPure(rnd)
+            f.width = width; f.height = height
+            if (!autoFit(f, rnd.nextLong())) return@repeat
+            val r = Renderer(f, 120, 90, threads = 1, seed = rnd.nextLong())
+            r.addSamples(r.samplesFor(6.0))
+            val px = r.toArgb()
+            r.shutdown()
+            val bgL = (f.bgR + f.bgG + f.bgB) / 765.0
+            val cov = px.count { c -> Palettes.luma(c) - bgL > 0.08 }.toDouble() / px.size
+            if (cov in 0.015..0.97) return f
+            if (fallback == null && cov > 0.0) fallback = f
+        }
+        return fallback ?: generate(Style.CLASSIC, width, height, rnd.nextLong())
+    }
+
+    /** Give every parameter of [v] a random value spanning well beyond its default. */
+    fun randomizeWild(v: Variation, r: Random) {
+        for (p in v.params) {
+            val d = p.value
+            if (p.isInt) {
+                // integer settings are counts/powers/modes: keep them small so loops stay fast
+                var n = 1 + r.nextInt(10)
+                if (d < 0 || r.nextDouble() < 0.2) n = -n
+                if (d == 0.0 && r.nextDouble() < 0.4) n = r.nextInt(3)
+                p.value = n.toDouble()
+            } else {
+                val span = max(2.0, abs(d) * 2.5)
+                p.value = when (r.nextInt(4)) {
+                    0 -> d                                        // sometimes keep the default
+                    1 -> d + r.nextGaussian() * span * 0.3        // near the default
+                    else -> (r.nextDouble() * 2 - 1) * span       // anywhere in range
+                }
+            }
+        }
+    }
+
+    private fun buildPure(r: Random): Flame {
+        val f = Flame()
+        f.name = "Pure random ${Integer.toHexString(r.nextInt(0xFFFFF))}"
+        f.palette = if (r.nextDouble() < 0.7) Palettes.random(r) else Palettes.builtIn[r.nextInt(Palettes.builtIn.size)].colors.copyOf()
+        f.brightness = 2.5 + r.nextDouble() * 4
+        f.gamma = 2.5 + r.nextDouble() * 2.5
+        f.vibrancy = 0.6 + r.nextDouble() * 0.4
+        val all = Variations.names
+        val n = 2 + r.nextInt(5)
+        repeat(n) {
+            val x = XForm()
+            x.c00 = r.nextDouble() * 3 - 1.5; x.c01 = r.nextDouble() * 3 - 1.5
+            x.c10 = r.nextDouble() * 3 - 1.5; x.c11 = r.nextDouble() * 3 - 1.5
+            x.c20 = r.nextDouble() * 3 - 1.5; x.c21 = r.nextDouble() * 3 - 1.5
+            if (r.nextDouble() < 0.25) {
+                x.p00 = r.nextDouble() * 2 - 1; x.p01 = r.nextDouble() * 2 - 1
+                x.p10 = r.nextDouble() * 2 - 1; x.p11 = r.nextDouble() * 2 - 1
+                x.p20 = r.nextDouble() - 0.5; x.p21 = r.nextDouble() - 0.5
+            }
+            repeat(1 + r.nextInt(4)) {
+                val e = x.addVariation(all[r.nextInt(all.size)], (r.nextDouble() * 2 - 0.5) * (0.3 + r.nextDouble()))
+                randomizeWild(e.variation, r)
+            }
+            x.weight = 0.1 + r.nextDouble() * 2
+            x.color = r.nextDouble()
+            x.colorSymmetry = r.nextDouble() * 2 - 1
+            if (r.nextDouble() < 0.15) x.opacity = r.nextDouble()
+            f.xforms += x
+        }
+        if (r.nextDouble() < 0.2) f.xforms.forEach { x -> x.xaos = DoubleArray(n) { if (r.nextDouble() < 0.25) r.nextDouble() * 2 else 1.0 } }
+        if (r.nextDouble() < 0.35) {
+            val fin = XForm()
+            fin.colorSymmetry = 1.0
+            if (r.nextBoolean()) { fin.c00 = r.nextDouble() * 2 - 1; fin.c11 = r.nextDouble() * 2 - 1; fin.c20 = r.nextDouble() - 0.5; fin.c21 = r.nextDouble() - 0.5 }
+            val e = fin.addVariation(all[r.nextInt(all.size)], 0.4 + r.nextDouble())
+            randomizeWild(e.variation, r)
+            f.finalXform = fin
+        }
+        if (r.nextDouble() < 0.2) { val g = r.nextInt(40); f.bgR = g; f.bgG = g; f.bgB = g + r.nextInt(25) }
+        return f
+    }
 
     private fun randomAffine(x: XForm, r: Random, scaleMin: Double = 0.25, scaleMax: Double = 1.0) {
         x.resetAffine()
@@ -70,6 +166,7 @@ object RandomFlame {
         f.gamma = 3.0 + r.nextDouble() * 1.5
         f.vibrancy = 1.0
         when (style) {
+            Style.PURE -> return buildPure(r)
             Style.CLASSIC, Style.MIXED -> {
                 val n = 2 + r.nextInt(3)
                 repeat(n) {

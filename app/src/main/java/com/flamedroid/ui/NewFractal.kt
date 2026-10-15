@@ -22,9 +22,11 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Casino
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.NoteAdd
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
@@ -89,10 +91,22 @@ fun NewFractalScreen(vm: FlameViewModel, onClose: () -> Unit) {
                     modifier = Modifier.padding(horizontal = 12.dp)
                 ) {
                     item(span = { GridItemSpan(maxLineSpan) }) {
-                        FilledTonalButton(
-                            onClick = { vm.stopGallery(); vm.newBlank(); onClose() },
-                            modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
-                        ) { Icon(Icons.Filled.NoteAdd, null); Text("  Start blank — build from scratch") }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 4.dp)) {
+                            FilledTonalButton(
+                                onClick = { vm.stopGallery(); vm.newBlank(); onClose() },
+                                modifier = Modifier.weight(1f)
+                            ) { Icon(Icons.Filled.NoteAdd, null); Text("  Blank") }
+                            Button(
+                                onClick = { vm.stopGallery(); vm.randomFlame(RandomFlame.Style.PURE); onClose() },
+                                modifier = Modifier.weight(1f)
+                            ) { Icon(Icons.Filled.Casino, null); Text("  Pure random") }
+                        }
+                        Text(
+                            "Pure random: any variations, every setting random. Expect wild results — tap again for another.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
                     }
                     item(span = { GridItemSpan(maxLineSpan) }) { SectionTitle("Random — tap one to open it") }
                     item(span = { GridItemSpan(maxLineSpan) }) {

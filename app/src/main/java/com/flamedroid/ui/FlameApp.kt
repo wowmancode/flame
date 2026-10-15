@@ -111,8 +111,8 @@ fun FlameApp(vm: FlameViewModel) {
                     Box {
                         IconButton(onClick = { randomMenu = true }) { Icon(Icons.Filled.Casino, "Random flame") }
                         DropdownMenu(expanded = randomMenu, onDismissRequest = { randomMenu = false }) {
-                            RandomFlame.Style.values().forEach { s ->
-                                DropdownMenuItem(text = { Text("Random: ${s.label}") }, onClick = {
+                            (listOf(RandomFlame.Style.PURE) + RandomFlame.Style.entries.filter { it != RandomFlame.Style.PURE }).forEach { s ->
+                                DropdownMenuItem(text = { Text(if (s == RandomFlame.Style.PURE) "Pure random (anything goes)" else "Random: ${s.label}") }, onClick = {
                                     randomMenu = false; vm.randomFlame(s)
                                 })
                             }

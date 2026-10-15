@@ -16,6 +16,7 @@ It opens and saves JWildfire / Apophysis `.flame` files, so you can move flames 
 - Tone mapping: brightness, gamma, gamma threshold, vibrancy, contrast
 - **New blank fractal** button to build from scratch, and a **New fractal** screen: pick from a gallery of random fractals in any style, or start from
   10 templates (Sierpinski, Fern, Dragon, Julia spiral, Galaxy, Kaleidoscope, Hyperbolic tiling, ...)
+- **Pure random**: any of the 193 variations with every setting randomized (New fractal screen and dice menu)
 - Random generator styles: Classic, Symmetric, Spiral, Julians, Bubbles, Galaxy, Kaleidoscope, Tiles, Crystal; plus "mutate"
 - Custom gradient editor: tap to add color points, tap a point for an HSV color picker
 - Performance modes (Eco / Balanced / Fast) to trade preview speed against heat and battery
