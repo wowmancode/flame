@@ -338,6 +338,9 @@ fun ColorsTab(vm: FlameViewModel) {
     SectionTitle("Current gradient")
     PaletteStrip(f.palette)
     ValueSlider("Shift", vm.paletteShift.toDouble(), 0.0..255.0, { v -> vm.changePaletteShift(v.toInt()) }, integer = true)
+    SectionTitle("Custom gradient")
+    GradientEditor(vm)
+    SectionTitle("Adjust")
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         FilledTonalButton(onClick = { vm.setPalette(Palettes.random(java.util.Random())) }) { Icon(Icons.Filled.Casino, null); Text("Random") }
         OutlinedButton(onClick = vm::reversePalette) { Text("Reverse") }
