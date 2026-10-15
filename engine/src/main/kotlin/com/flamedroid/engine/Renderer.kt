@@ -20,6 +20,39 @@ object RenderPool {
 }
 
 /**
+ * Recycles histogram buffers between renders. Interactive previews create a renderer per
+ * frame; without recycling that is megabytes of garbage per second, and the garbage
+ * collector's work shows up as heat.
+ */
+object HistPool {
+    private val free = HashMap<Int, ArrayList<FloatArray>>()
+    private var held = 0L
+    private const val MAX_HELD = 24L * 1024 * 1024 // bytes kept for reuse
+    /** Only small (interactive-frame) buffers are pooled; big ones are allocated once per render. */
+    private const val MAX_POOLED = 1_100_000
+
+    @Synchronized fun get(size: Int): FloatArray {
+        if (size > MAX_POOLED) return FloatArray(size)
+        val list = free[size]
+        if (list != null && list.isNotEmpty()) {
+            val a = list.removeAt(list.size - 1)
+            held -= a.size * 4L
+            java.util.Arrays.fill(a, 0f)
+            return a
+        }
+        return FloatArray(size)
+    }
+
+    @Synchronized fun put(a: FloatArray) {
+        if (a.size > MAX_POOLED || held + a.size * 4L > MAX_HELD) return
+        free.getOrPut(a.size) { ArrayList() }.add(a)
+        held += a.size * 4L
+    }
+
+    @Synchronized fun clear() { free.clear(); held = 0 }
+}
+
+/**
  * Progressive chaos-game renderer with flam3/JWildfire style log-density tone mapping.
  * Call [addSamples] repeatedly from one background thread and [toArgb] to get the image.
  */
@@ -40,6 +73,9 @@ class Renderer(
      */
     private val privateHist = pixels.toLong() * 16 * nThreads <= 96L * 1024 * 1024
     private val shared: FloatArray? = if (privateHist) null else FloatArray(pixels * 4)
+    private var mergeBuf: FloatArray? = null
+    @Volatile private var released = false
+    @Volatile private var running = false
 
     @Volatile var totalSamples = 0L; private set
     private val cancelled = AtomicBoolean(false)
@@ -65,12 +101,24 @@ class Renderer(
     fun cancel() = cancelled.set(true)
     val isCancelled get() = cancelled.get()
 
-    /** Releases memory; the shared pool stays alive. */
-    fun shutdown() { cancel() }
+    /** Stops work and returns buffers for reuse. Call once, after the last addSamples/toArgb. */
+    fun shutdown() {
+        cancel()
+        if (released || running) return // still iterating: let GC take the buffers instead
+        released = true
+        for (w in workers) w.hist?.let { HistPool.put(it) }
+        mergeBuf?.let { HistPool.put(it) }
+    }
 
     /** Iterate roughly [samples] more points across the workers. Returns false if cancelled. */
     fun addSamples(samples: Long): Boolean {
-        if (cancelled.get() || flame.xforms.isEmpty() || samples <= 0) return !cancelled.get()
+        if (cancelled.get() || released || flame.xforms.isEmpty() || samples <= 0) return !cancelled.get()
+        running = true
+        try { iterate(samples) } finally { running = false }
+        return !cancelled.get()
+    }
+
+    private fun iterate(samples: Long) {
         val per = samples / workers.size + 1
         if (workers.size == 1) {
             totalSamples += workers[0].run(per)
@@ -80,7 +128,6 @@ class Renderer(
             for (f in futures) done += try { f.get() } catch (e: Exception) { 0L }
             totalSamples += done
         }
-        return !cancelled.get()
     }
 
     fun samplesFor(spp: Double) = (spp * pixels).toLong()
@@ -90,7 +137,8 @@ class Renderer(
     private fun merged(): FloatArray {
         shared?.let { return it }
         if (workers.size == 1) return workers[0].hist!!
-        val out = workers[0].hist!!.copyOf()
+        val out = mergeBuf ?: HistPool.get(pixels * 4).also { mergeBuf = it }
+        System.arraycopy(workers[0].hist!!, 0, out, 0, out.size)
         for (k in 1 until workers.size) {
             val h = workers[k].hist!!
             for (i in out.indices) out[i] += h[i]
@@ -114,6 +162,8 @@ class Renderer(
         val inv10 = k1 / ln(10.0)
 
         fun gam(x: Double) = if (x <= 0) 0.0 else if (x >= thr) Math.exp(g * ln(x)) else x * thrPow
+
+        if (vib >= 0.999) return toArgbLut(hist, out, k2, inv10, ::gam, bgr, bgg, bgb, bgArgb)
 
         var i = 0
         var p = 0
@@ -151,6 +201,57 @@ class Renderer(
         return out
     }
 
+    /**
+     * Fast path for full vibrancy (the default): every pixel's scale factor depends only on
+     * its hit count, so it is computed once per distinct count from a lookup table instead
+     * of a log and a pow per pixel.
+     */
+    private fun toArgbLut(
+        hist: FloatArray, out: IntArray, k2: Double, inv10: Double, gam: (Double) -> Double,
+        bgr: Double, bgg: Double, bgb: Double, bgArgb: Int
+    ): IntArray {
+        val lutSize = 4096
+        val scale = FloatArray(lutSize) // color multiplier per hit count
+        val alph = FloatArray(lutSize)  // coverage alpha per hit count
+        for (c in 1 until lutSize) {
+            val alpha = inv10 * ln(1.0 + c * k2)
+            val ag = gam(alpha)
+            scale[c] = (ag / c).toFloat()
+            alph[c] = min(1.0, ag).toFloat()
+        }
+        val br = bgr.toFloat(); val bgF = bgg.toFloat(); val bb = bgb.toFloat()
+        var i = 0
+        var p = 0
+        while (p < pixels) {
+            val cntF = hist[i + 3]
+            if (cntF <= 0f) {
+                out[p] = bgArgb
+            } else {
+                val c = cntF.toInt()
+                val sc: Float; val a: Float
+                if (c < lutSize && cntF == c.toFloat()) { sc = scale[c]; a = alph[c] }
+                else {
+                    val alpha = inv10 * ln(1.0 + cntF * k2)
+                    val ag = gam(alpha)
+                    sc = (ag / cntF).toFloat(); a = min(1.0, ag).toFloat()
+                }
+                var r = hist[i] * sc
+                var g = hist[i + 1] * sc
+                var b = hist[i + 2] * sc
+                val m = max(r, max(g, b))
+                if (m > 1f) { r /= m; g /= m; b /= m }
+                val ia = 1f - a
+                r += ia * br; g += ia * bgF; b += ia * bb
+                out[p] = (0xFF shl 24) or
+                        ((min(1f, max(0f, r)) * 255f + 0.5f).toInt() shl 16) or
+                        ((min(1f, max(0f, g)) * 255f + 0.5f).toInt() shl 8) or
+                        (min(1f, max(0f, b)) * 255f + 0.5f).toInt()
+            }
+            i += 4; p++
+        }
+        return out
+    }
+
     /** Fraction of pixels that received at least one hit. */
     fun coverage(): Double {
         val hist = merged()
@@ -163,7 +264,7 @@ class Renderer(
     // ------------------------------------------------------------------ worker
 
     private inner class Worker(val fl: Flame, seed: Long) {
-        val hist: FloatArray? = if (privateHist) FloatArray(pixels * 4) else null
+        val hist: FloatArray? = if (privateHist) HistPool.get(pixels * 4) else null
         val ctx = Ctx(seed)
         val xfs = fl.xforms.toTypedArray()
         val fin = fl.finalXform

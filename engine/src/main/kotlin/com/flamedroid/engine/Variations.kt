@@ -10,6 +10,9 @@
 package com.flamedroid.engine
 
 import kotlin.math.*
+import com.flamedroid.engine.FastMath.atan2
+import com.flamedroid.engine.FastMath.cos
+import com.flamedroid.engine.FastMath.sin
 
 // ---------------------------------------------------------------- classic flam3 set
 
@@ -345,13 +348,13 @@ class Noise : Variation("noise") {
 class JuliaN : Variation("julian") {
     private var power by intParam("power", 3)
     private var dist by param("dist", 1.0)
-    private var absPower = 1; private var cPower = 0.0
+    private var absPower = 1; private var cPower = 0.0; private var pw = 1.0
     override fun init(ctx: Ctx, xf: XForm, amount: Double) {
         if (power == 0.0) power = 1.0
-        absPower = abs(power.toInt()); cPower = dist / power * 0.5
+        absPower = abs(power.toInt()); cPower = dist / power * 0.5; pw = power
     }
     override fun transform(ctx: Ctx, xf: XForm, a: Pt, v: Pt, amount: Double) {
-        val ang = (atan2(a.y, a.x) + 2 * M_PI * ctx.random(absPower)) / power
+        val ang = (atan2(a.y, a.x) + 2 * M_PI * ctx.random(absPower)) / pw
         val r = amount * (sqr(a.x) + sqr(a.y)).pow(cPower)
         v.x += r * cos(ang); v.y += r * sin(ang)
         z(ctx, a, v, amount)

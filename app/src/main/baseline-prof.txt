@@ -1,0 +1,6 @@
+# Baseline profile: ask Android to compile the rendering engine ahead of time at install,
+# instead of interpreting it until the JIT warms up (slow and hot for the first seconds).
+HSPLcom/flamedroid/engine/**;->**(**)**
+Lcom/flamedroid/engine/**;
+HSPLcom/flamedroid/FlameViewModel**;->**(**)**
+Lcom/flamedroid/FlameViewModel**;

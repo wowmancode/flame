@@ -20,6 +20,7 @@ import com.flamedroid.engine.Flame
 import com.flamedroid.engine.FlameXml
 import com.flamedroid.engine.Palettes
 import com.flamedroid.engine.RandomFlame
+import com.flamedroid.engine.Templates
 import com.flamedroid.engine.RenderPool
 import com.flamedroid.engine.Renderer
 import com.flamedroid.engine.XForm
@@ -36,10 +37,11 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.roundToInt
 
-private class PreviewSnap(val flame: Flame, val interactive: Boolean, val hq: Boolean, val quick: Pair<Int, Int>, val full: Pair<Int, Int>)
+private class PreviewSnap(val flame: Flame, val interactive: Boolean, val mode: PerfMode, val quick: Pair<Int, Int>, val full: Pair<Int, Int>)
 
 class FlameViewModel(app: Application) : AndroidViewModel(app) {
 
@@ -60,7 +62,19 @@ class FlameViewModel(app: Application) : AndroidViewModel(app) {
         private set
     var previewSpp by mutableFloatStateOf(0f)
         private set
-    var highQualityPreview by mutableStateOf(false)
+    private val prefs = app.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
+
+    /** Eco / Balanced / Fast — see [PerfMode]. Persisted. */
+    var perfMode by mutableStateOf(
+        PerfMode.entries.firstOrNull { it.name == prefs.getString("perf", null) } ?: PerfMode.BALANCED
+    )
+        private set
+
+    fun changePerfMode(m: PerfMode) {
+        perfMode = m
+        prefs.edit().putString("perf", m.name).apply()
+        requestPreview()
+    }
 
     var message by mutableStateOf<String?>(null)
 
@@ -247,13 +261,12 @@ class FlameViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---------------------------------------------------------------- preview rendering
     //
-    // One long-lived loop renders the preview. While the user drags a slider or the preview,
-    // it shows quick low-resolution frames (capped at ~30 fps) instead of restarting a full
-    // render on every tick. Once input stops it refines progressively and then goes idle,
-    // so the phone isn't kept at full load.
-
-    /** Fewer threads than cores for the preview: most of the speed, much less heat. */
-    private val previewThreads = ((RenderPool.cores + 1) / 2).coerceIn(1, 4)
+    // One long-lived loop renders the preview:
+    //  - while the user drags, quick low-resolution frames at a capped frame rate;
+    //  - once input settles, progressive refinement in short bursts with rests between them
+    //    (so the CPU isn't pinned at full boost clock, which is what heats a phone);
+    //  - refinement stops at the mode's quality ceiling, or earlier once the image stops
+    //    visibly changing; then the loop sleeps until the next edit.
 
     private fun previewSize(long: Int): Pair<Int, Int> {
         val f = flame
@@ -274,9 +287,43 @@ class FlameViewModel(app: Application) : AndroidViewModel(app) {
         if (p) refiningRenderer?.cancel() else requestPreview()
     }
 
-    private suspend fun publish(r: Renderer, w: Int, h: Int, spp: Double) {
-        val bmp = Bitmap.createBitmap(r.toArgb(), w, h, Bitmap.Config.ARGB_8888).asImageBitmap()
-        withContext(Dispatchers.Main) { preview = bmp; previewSpp = spp.toFloat() }
+    /** Reused pixel buffers and a small ring of bitmaps per size (no per-frame allocation). */
+    private class FrameBuffers(val w: Int, val h: Int) {
+        val argb = IntArray(w * h)
+        val prev = IntArray(w * h)
+        val bitmaps = Array(3) { Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888) }
+        var next = 0
+    }
+    private val frameBuffers = HashMap<Long, FrameBuffers>()
+
+    private fun buffers(w: Int, h: Int): FrameBuffers {
+        val key = (w.toLong() shl 32) or h.toLong()
+        frameBuffers[key]?.let { return it }
+        if (frameBuffers.size > 4) frameBuffers.clear() // aspect/mode changes: drop old sizes
+        return FrameBuffers(w, h).also { frameBuffers[key] = it }
+    }
+
+    private suspend fun publish(r: Renderer, fb: FrameBuffers, spp: Double) {
+        r.toArgb(fb.argb)
+        // write into a bitmap that isn't on screen, then hand it over
+        val bmp = fb.bitmaps[fb.next]
+        fb.next = (fb.next + 1) % fb.bitmaps.size
+        bmp.setPixels(fb.argb, 0, fb.w, 0, 0, fb.w, fb.h)
+        val img = bmp.asImageBitmap()
+        withContext(Dispatchers.Main) { preview = img; previewSpp = spp.toFloat() }
+    }
+
+    /** Mean per-channel change between two frames, sampled on a sparse grid (0..255). */
+    private fun frameDelta(a: IntArray, b: IntArray): Double {
+        var sum = 0L; var n = 0
+        var i = 0
+        while (i < a.size) {
+            val x = a[i]; val y = b[i]
+            sum += abs((x shr 16 and 255) - (y shr 16 and 255)) + abs((x shr 8 and 255) - (y shr 8 and 255)) + abs((x and 255) - (y and 255))
+            n += 3
+            i += 13
+        }
+        return if (n == 0) 0.0 else sum.toDouble() / n
     }
 
     private fun startPreviewLoop() = viewModelScope.launch(Dispatchers.Default) {
@@ -286,38 +333,56 @@ class FlameViewModel(app: Application) : AndroidViewModel(app) {
             rendered = req
             if (paused) continue
             val snap = withContext(Dispatchers.Main) {
+                val m = perfMode
                 PreviewSnap(
                     flame.deepCopy(),
                     System.currentTimeMillis() - lastInteraction < 250,
-                    highQualityPreview,
-                    previewSize(360),
-                    previewSize(if (highQualityPreview) 1080 else 720)
+                    m,
+                    previewSize(m.quickLong),
+                    previewSize(m.previewLong)
                 )
             }
+            val mode = snap.mode
             if (snap.interactive) {
                 val t0 = System.currentTimeMillis()
                 val (qw, qh) = snap.quick
-                val q = Renderer(snap.flame, qw, qh, previewThreads)
-                q.addSamples(q.samplesFor(2.0))
-                publish(q, qw, qh, 2.0)
-                val spare = 33 - (System.currentTimeMillis() - t0)
+                val fb = buffers(qw, qh)
+                val q = Renderer(snap.flame, qw, qh, mode.previewThreads)
+                try {
+                    q.addSamples(q.samplesFor(mode.quickSpp))
+                    publish(q, fb, mode.quickSpp)
+                } finally { q.shutdown() }
+                val spare = 1000L / mode.fps - (System.currentTimeMillis() - t0)
                 if (spare > 0) delay(spare)
                 // keep showing quick frames while input continues; refine once it settles
                 val next = withTimeoutOrNull(250) { previewRequests.first { it != req } }
                 if (next != null) continue
             }
             val (w, h) = snap.full
-            val r = Renderer(snap.flame, w, h, previewThreads)
+            val fb = buffers(w, h)
+            val r = Renderer(snap.flame, w, h, mode.previewThreads)
             refiningRenderer = r
             try {
-                val steps = if (snap.hq) doubleArrayOf(0.5, 2.0, 6.0, 15.0, 40.0, 100.0, 200.0)
-                else doubleArrayOf(0.5, 2.0, 6.0, 15.0, 35.0)
+                // checkpoints at which the image is shown; the work between them is split into
+                // ~1 spp bursts so rests can be inserted and edits interrupt quickly
+                val shows = doubleArrayOf(0.5, 2.0, 5.0, 10.0, 20.0, 35.0, 60.0, 100.0).filter { it <= mode.maxSpp } +
+                        listOf(mode.maxSpp)
                 var done = 0.0
-                for (spp in steps) {
-                    if (previewRequests.value != req || paused) break
-                    if (!r.addSamples(r.samplesFor(spp - done))) break
-                    done = spp
-                    publish(r, w, h, spp)
+                var lastShown = -1.0
+                loop@ for (target in shows.distinct().sorted()) {
+                    while (done < target) {
+                        if (previewRequests.value != req || paused) break@loop
+                        val step = minOf(target - done, if (done < 2.0) target - done else 1.5)
+                        val t0 = System.nanoTime()
+                        if (!r.addSamples(r.samplesFor(step))) break@loop
+                        done += step
+                        if (mode.rest > 0) delay(((System.nanoTime() - t0) / 1_000_000 * mode.rest).toLong())
+                    }
+                    System.arraycopy(fb.argb, 0, fb.prev, 0, fb.argb.size)
+                    publish(r, fb, done)
+                    // stop early once more samples no longer visibly change the image
+                    if (lastShown >= 5.0 && frameDelta(fb.argb, fb.prev) < 0.35) break
+                    lastShown = done
                 }
             } finally {
                 refiningRenderer = null
@@ -326,6 +391,76 @@ class FlameViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    // ---------------------------------------------------------------- new fractal: gallery & templates
+
+    class GalleryItem(val flame: Flame, val thumb: ImageBitmap)
+
+    var gallery by mutableStateOf<List<GalleryItem>>(emptyList())
+        private set
+    var galleryBusy by mutableStateOf(false)
+        private set
+    var templateThumbs by mutableStateOf<Map<Int, ImageBitmap>>(emptyMap())
+        private set
+    private var galleryJob: Job? = null
+    private var templateJob: Job? = null
+
+    private fun thumbSize(w: Int, h: Int, long: Int = 260): Pair<Int, Int> =
+        if (w >= h) long to max(1, long * h / w) else max(1, long * w / h) to long
+
+    /** Small preview image of a flame (runs on a background thread). */
+    private fun renderThumb(f: Flame, threads: Int): ImageBitmap {
+        val (w, h) = thumbSize(f.width, f.height)
+        val r = Renderer(f, w, h, threads)
+        try {
+            r.addSamples(r.samplesFor(25.0))
+            return Bitmap.createBitmap(r.toArgb(), w, h, Bitmap.Config.ARGB_8888).asImageBitmap()
+        } finally { r.shutdown() }
+    }
+
+    /** Generate [count] random fractals of a style, adding each to [gallery] as it's ready. */
+    fun generateGallery(style: RandomFlame.Style, count: Int = 6) {
+        galleryJob?.cancel()
+        gallery = emptyList()
+        galleryBusy = true
+        val w = flame.width; val h = flame.height
+        val threads = perfMode.previewThreads
+        galleryJob = viewModelScope.launch(Dispatchers.Default) {
+            try {
+                repeat(count) {
+                    if (!isActive) return@launch
+                    val f = RandomFlame.generate(style, w, h)
+                    val img = renderThumb(f, threads)
+                    withContext(Dispatchers.Main) { gallery = gallery + GalleryItem(f, img) }
+                }
+            } finally {
+                withContext(kotlinx.coroutines.NonCancellable + Dispatchers.Main) { galleryBusy = false }
+            }
+        }
+    }
+
+    fun stopGallery() { galleryJob?.cancel() }
+
+    fun loadTemplateThumbs() {
+        if (templateJob?.isActive == true || templateThumbs.size == Templates.all.size) return
+        val threads = perfMode.previewThreads
+        templateJob = viewModelScope.launch(Dispatchers.Default) {
+            Templates.all.forEachIndexed { i, t ->
+                if (!isActive || templateThumbs.containsKey(i)) return@forEachIndexed
+                val img = renderThumb(t.build(), threads)
+                withContext(Dispatchers.Main) { templateThumbs = templateThumbs + (i to img) }
+            }
+        }
+    }
+
+    fun newFromTemplate(index: Int) {
+        viewModelScope.launch {
+            val f = withContext(Dispatchers.Default) { Templates.all[index].build() }
+            replaceFlame(f)
+        }
+    }
+
+    fun openGalleryItem(item: GalleryItem) = replaceFlame(item.flame.deepCopy())
+
     // ---------------------------------------------------------------- export image
 
     fun exportImage(width: Int, height: Int, spp: Double) {
@@ -333,7 +468,7 @@ class FlameViewModel(app: Application) : AndroidViewModel(app) {
         val snapshot = flame.deepCopy()
         exportProgress = 0f
         exportJob = viewModelScope.launch(Dispatchers.Default) {
-            val r = try { Renderer(snapshot, width, height, RenderPool.cores) } catch (e: OutOfMemoryError) {
+            val r = try { Renderer(snapshot, width, height, perfMode.exportThreads) } catch (e: OutOfMemoryError) {
                 withContext(Dispatchers.Main) { exportProgress = null; message = "Not enough memory for ${width}×$height" }
                 return@launch
             }

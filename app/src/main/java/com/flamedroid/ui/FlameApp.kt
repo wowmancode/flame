@@ -25,6 +25,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Redo
 import androidx.compose.material.icons.automirrored.filled.Undo
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Casino
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Save
@@ -80,6 +81,8 @@ fun FlameApp(vm: FlameViewModel) {
     var menu by remember { mutableStateOf(false) }
     var randomMenu by remember { mutableStateOf(false) }
     var showExport by remember { mutableStateOf(false) }
+    var showNew by remember { mutableStateOf(false) }
+    var showPerf by remember { mutableStateOf(false) }
     @Suppress("UNUSED_VARIABLE") val rev = vm.revision
 
     val openFlame = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -105,7 +108,7 @@ fun FlameApp(vm: FlameViewModel) {
                 actions = {
                     IconButton(onClick = vm::undo, enabled = vm.canUndo) { Icon(Icons.AutoMirrored.Filled.Undo, "Undo") }
                     IconButton(onClick = vm::redo, enabled = vm.canRedo) { Icon(Icons.AutoMirrored.Filled.Redo, "Redo") }
-                    IconButton(onClick = vm::mutate) { Icon(Icons.Filled.Shuffle, "Mutate") }
+                    IconButton(onClick = { showNew = true }) { Icon(Icons.Filled.AutoAwesome, "New fractal") }
                     Box {
                         IconButton(onClick = { randomMenu = true }) { Icon(Icons.Filled.Casino, "Random flame") }
                         DropdownMenu(expanded = randomMenu, onDismissRequest = { randomMenu = false }) {
@@ -129,9 +132,12 @@ fun FlameApp(vm: FlameViewModel) {
                             })
                             HorizontalDivider()
                             DropdownMenuItem(text = { Text("Auto-fit camera") }, onClick = { menu = false; vm.autoFit() })
+                            DropdownMenuItem(text = { Text("New fractal…") }, onClick = { menu = false; showNew = true })
+                            DropdownMenuItem(text = { Text("Mutate (small random change)") },
+                                leadingIcon = { Icon(Icons.Filled.Shuffle, null) }, onClick = { menu = false; vm.mutate() })
                             DropdownMenuItem(
-                                text = { Text(if (vm.highQualityPreview) "Preview: fast" else "Preview: high quality") },
-                                onClick = { menu = false; vm.highQualityPreview = !vm.highQualityPreview; vm.restartPreview() })
+                                text = { Text("Performance: ${vm.perfMode.label}…") },
+                                onClick = { menu = false; showPerf = true })
                         }
                     }
                 }
@@ -163,6 +169,8 @@ fun FlameApp(vm: FlameViewModel) {
     }
 
     if (showExport) ExportDialog(vm) { showExport = false }
+    if (showNew) NewFractalScreen(vm) { showNew = false }
+    if (showPerf) PerformanceDialog(vm) { showPerf = false }
 
     if (vm.pendingFlames.isNotEmpty()) {
         AlertDialog(

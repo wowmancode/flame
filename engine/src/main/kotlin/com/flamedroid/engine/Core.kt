@@ -4,7 +4,7 @@
  */
 package com.flamedroid.engine
 
-import kotlin.math.atan2
+import com.flamedroid.engine.FastMath.atan2
 import kotlin.math.sqrt
 import kotlin.properties.ReadWriteProperty
 import kotlin.reflect.KProperty

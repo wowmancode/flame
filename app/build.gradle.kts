@@ -55,4 +55,6 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.6")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.6")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+    // installs the baseline profile so the engine is precompiled
+    implementation("androidx.profileinstaller:profileinstaller:1.3.1")
 }

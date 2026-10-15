@@ -9,7 +9,10 @@ import kotlin.math.min
 /** Random flame generators, loosely modelled on JWildfire's built-in generators. */
 object RandomFlame {
 
-    enum class Style(val label: String) { MIXED("Mixed"), CLASSIC("Classic"), SYMMETRIC("Symmetric"), SPIRAL("Spiral"), JULIA("Julians"), BUBBLES("Bubbles") }
+    enum class Style(val label: String) {
+        MIXED("Mixed"), CLASSIC("Classic"), SYMMETRIC("Symmetric"), SPIRAL("Spiral"), JULIA("Julians"),
+        BUBBLES("Bubbles"), GALAXY("Galaxy"), KALEIDO("Kaleidoscope"), TILES("Tiles"), CRYSTAL("Crystal")
+    }
 
     fun generate(style: Style = Style.MIXED, width: Int = 800, height: Int = 600, seed: Long = System.nanoTime()): Flame {
         val rnd = Random(seed)
@@ -123,8 +126,78 @@ object RandomFlame {
                     x.weight = 0.3 + r.nextDouble(); f.xforms += x
                 }
             }
+            Style.GALAXY -> {
+                // a strongly weighted rotating contraction makes the arms; satellites add detail
+                val arms = XForm()
+                val sc = 0.88 + r.nextDouble() * 0.09
+                arms.c00 = sc; arms.c11 = sc
+                arms.rotate(15 + r.nextDouble() * 35)
+                arms.addVariation("linear", 1.0)
+                if (r.nextBoolean()) arms.addVariation("swirl", 0.02 + r.nextDouble() * 0.05)
+                arms.weight = 6.0 + r.nextDouble() * 8
+                arms.colorSymmetry = 0.8
+                f.xforms += arms
+                repeat(1 + r.nextInt(2)) {
+                    val x = XForm()
+                    x.scale(0.15 + r.nextDouble() * 0.35)
+                    x.move(0.6 + r.nextDouble() * 0.8, (r.nextDouble() - 0.5) * 0.4)
+                    x.addVariation(listOf("linear", "julia", "spherical", "bubble", "disc", "eyefish")[r.nextInt(6)], 0.8)
+                    if (r.nextDouble() < 0.6) x.addVariation(if (r.nextBoolean()) "gaussian_blur" else "blur", 0.01 + r.nextDouble() * 0.05)
+                    x.weight = 0.5 + r.nextDouble()
+                    f.xforms += x
+                }
+            }
+            Style.KALEIDO -> {
+                repeat(1 + r.nextInt(2)) {
+                    val x = XForm(); randomAffine(x, r, 0.3, 0.9); addRandomVars(x, r, 2); x.weight = 0.5 + r.nextDouble(); f.xforms += x
+                }
+                val order = 5 + r.nextInt(8)
+                for (k in 1 until order) {
+                    val x = XForm()
+                    x.rotate(360.0 / order * k)
+                    x.addVariation("linear", 1.0)
+                    x.weight = 0.4
+                    x.colorSymmetry = 1.0
+                    f.xforms += x
+                }
+                val m = XForm(); m.c00 = -1.0; m.addVariation("linear", 1.0); m.weight = 0.4; m.colorSymmetry = 1.0; f.xforms += m
+                // final transforms that keep rotational symmetry (julian/polar would fold it away)
+                if (r.nextDouble() < 0.3) {
+                    val fin = XForm(); fin.colorSymmetry = 1.0
+                    val n = listOf("spherical", "eyefish", "bubble", "fisheye", "swirl", "hemisphere")[r.nextInt(6)]
+                    fin.addVariation(n, if (n == "swirl") 0.1 + r.nextDouble() * 0.3 else 0.7 + r.nextDouble() * 0.4)
+                    f.finalXform = fin
+                }
+            }
+            Style.TILES -> {
+                val tilers = listOf("rectangles", "checks", "hypertile", "cell", "bwraps", "splits", "stripes", "collideoscope")
+                repeat(2 + r.nextInt(2)) {
+                    val x = XForm(); randomAffine(x, r, 0.4, 1.0)
+                    x.addVariation(tilers[r.nextInt(tilers.size)], 0.5 + r.nextDouble() * 0.6).variation.randomize(r)
+                    if (r.nextDouble() < 0.6) x.addVariation(pickVar(r), r.nextDouble() * 0.4).variation.randomize(r)
+                    x.weight = 0.3 + r.nextDouble(); f.xforms += x
+                }
+            }
+            Style.CRYSTAL -> {
+                val crystals = listOf("ngon", "super_shape", "flower", "wedge", "circlize", "pie", "julian", "conic")
+                repeat(2 + r.nextInt(2)) {
+                    val x = XForm(); randomAffine(x, r, 0.3, 0.9)
+                    val v = x.addVariation(crystals[r.nextInt(crystals.size)], 0.6 + r.nextDouble() * 0.5).variation
+                    v.randomize(r)
+                    v.setParam("holes", 0.0) // holes scatter points into fog
+                    if (r.nextDouble() < 0.6) x.addVariation("linear", 0.2 + r.nextDouble() * 0.5)
+                    x.weight = 0.3 + r.nextDouble(); f.xforms += x
+                }
+                if (r.nextBoolean()) {
+                    val order = 3 + r.nextInt(6)
+                    for (k in 1 until order) {
+                        val x = XForm(); x.rotate(360.0 / order * k); x.addVariation("linear", 1.0)
+                        x.weight = 0.5; x.colorSymmetry = 1.0; f.xforms += x
+                    }
+                }
+            }
         }
-        if (r.nextDouble() < 0.3) {
+        if (f.finalXform == null && r.nextDouble() < 0.3) {
             val fin = XForm()
             fin.colorSymmetry = 1.0
             fin.addVariation(listOf("spherical", "julian", "bubble", "eyefish", "polar2", "swirl", "disc", "hyperbolic")[r.nextInt(8)], 0.6 + r.nextDouble() * 0.5)
