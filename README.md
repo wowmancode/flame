@@ -14,7 +14,11 @@ It opens and saves JWildfire / Apophysis `.flame` files, so you can move flames 
 - Per-variation amount and parameter sliders; tap any value to type an exact number; dice randomizes parameters
 - 18 built-in gradients, random gradients, shift and reverse, background color
 - Tone mapping: brightness, gamma, gamma threshold, vibrancy, contrast
-- Random flame generator (Classic, Symmetric, Spiral, Julians, Bubbles) plus "mutate"
+- **New fractal** screen: pick from a gallery of random fractals in any style, or start from
+  10 templates (Sierpinski, Fern, Dragon, Julia spiral, Galaxy, Kaleidoscope, Hyperbolic tiling, ...)
+- Random generator styles: Classic, Symmetric, Spiral, Julians, Bubbles, Galaxy, Kaleidoscope, Tiles, Crystal; plus "mutate"
+- Custom gradient editor: tap to add color points, tap a point for an HSV color picker
+- Performance modes (Eco / Balanced / Fast) to trade preview speed against heat and battery
 - Undo/redo, autosave, open/save `.flame` (multi-flame files supported), open `.flame` from file managers
 - Render to PNG up to 3840 px at up to 1000 samples per pixel, saved to `Pictures/FlameDroid`
 
