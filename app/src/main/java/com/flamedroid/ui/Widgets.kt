@@ -50,24 +50,41 @@ fun ValueSlider(
     integer: Boolean = false,
 ) {
     var editing by remember { mutableStateOf(false) }
-    val lo = minOf(range.start, value)
-    val hi = maxOf(range.endInclusive, value)
+    // The range is fixed when the slider first appears (so it never slides along with the
+    // value), widened only if a value falls outside it, and frozen completely during a drag.
+    val anchor = remember(label) { range }
+    var dragValue by remember { mutableStateOf<Float?>(null) }
+    var frozen by remember { mutableStateOf<ClosedFloatingPointRange<Float>?>(null) }
+    val live = run {
+        var lo = anchor.start
+        var hi = anchor.endInclusive
+        if (value < lo) lo = value - (hi - value) * 0.25
+        if (value > hi) hi = value + (value - lo) * 0.25
+        lo.toFloat()..hi.toFloat()
+    }
+    val r = frozen ?: live
+    val shown = dragValue?.toDouble() ?: value
     Column(modifier.fillMaxWidth()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(label, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
             Text(
-                fmt(value),
+                fmt(if (integer) Math.round(shown).toDouble() else shown),
                 style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
                 color = MaterialTheme.colorScheme.secondary,
                 modifier = Modifier.clickable { editing = true }.padding(horizontal = 6.dp, vertical = 2.dp)
             )
         }
         Slider(
-            value = value.toFloat(),
-            onValueChange = { v -> onChange(if (integer) Math.round(v).toDouble() else v.toDouble()) },
-            valueRange = lo.toFloat()..hi.toFloat(),
+            // the thumb follows the finger directly; the flame update happens alongside
+            value = (dragValue ?: value.toFloat()).coerceIn(r.start, r.endInclusive),
+            onValueChange = { v ->
+                if (frozen == null) frozen = r
+                dragValue = v
+                onChange(if (integer) Math.round(v).toDouble() else v.toDouble())
+            },
+            onValueChangeFinished = { dragValue = null; frozen = null },
+            valueRange = r,
             colors = SliderDefaults.colors(inactiveTrackColor = MaterialTheme.colorScheme.surfaceContainerHighest),
-            modifier = Modifier.height(32.dp)
         )
     }
     if (editing) NumberDialog(label, value, onDismiss = { editing = false }) {

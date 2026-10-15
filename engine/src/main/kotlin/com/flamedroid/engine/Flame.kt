@@ -34,11 +34,19 @@ class XForm {
     private var cc2 = 0.0
     private val aff = Pt()
     private val acc = Pt()
+    private var vArr: Array<Variation> = emptyArray()
+    private var aArr = DoubleArray(0)
+    private var post = false
 
+    /** Prepare for rendering: precompute constants and flatten the variation list. */
     fun init(ctx: Ctx) {
         cc1 = (1 + colorSymmetry) * 0.5
         cc2 = color * (1 - colorSymmetry) * 0.5
         for (e in variations) e.variation.init(ctx, this, e.amount)
+        val live = variations.filter { it.amount != 0.0 }
+        vArr = Array(live.size) { live[it].variation }
+        aArr = DoubleArray(live.size) { live[it].amount }
+        post = hasPost
     }
 
     fun transform(ctx: Ctx, src: Pt, dst: Pt) {
@@ -46,12 +54,10 @@ class XForm {
         aff.y = c01 * src.x + c11 * src.y + c21
         aff.z = src.z
         aff.invalidate()
-        acc.clear()
-        for (i in variations.indices) {
-            val e = variations[i]
-            e.variation.transform(ctx, this, aff, acc, e.amount)
-        }
-        if (hasPost) {
+        acc.x = 0.0; acc.y = 0.0; acc.z = 0.0
+        val va = vArr; val am = aArr
+        for (i in va.indices) va[i].transform(ctx, this, aff, acc, am[i])
+        if (post) {
             val px = p00 * acc.x + p10 * acc.y + p20
             val py = p01 * acc.x + p11 * acc.y + p21
             acc.x = px; acc.y = py

@@ -20,11 +20,15 @@ import com.flamedroid.engine.Flame
 import com.flamedroid.engine.FlameXml
 import com.flamedroid.engine.Palettes
 import com.flamedroid.engine.RandomFlame
+import com.flamedroid.engine.RenderPool
 import com.flamedroid.engine.Renderer
 import com.flamedroid.engine.XForm
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -35,10 +39,14 @@ import java.util.Locale
 import kotlin.math.max
 import kotlin.math.roundToInt
 
+private class PreviewSnap(val flame: Flame, val interactive: Boolean, val hq: Boolean, val quick: Pair<Int, Int>, val full: Pair<Int, Int>)
+
 class FlameViewModel(app: Application) : AndroidViewModel(app) {
 
     /** The flame being edited. Mutate it only through [edit]. */
-    var flame: Flame = loadAutosave() ?: RandomFlame.generate(RandomFlame.Style.MIXED, 1080, 1350)
+    private val restored = loadAutosave()
+
+    var flame: Flame = restored ?: starterFlame()
         private set
 
     /** Bumped on every change; composables read it to refresh. */
@@ -62,6 +70,10 @@ class FlameViewModel(app: Application) : AndroidViewModel(app) {
     var paletteShift by mutableIntStateOf(0)
         private set
 
+    /** Stops of the custom gradient editor (positions 0..1, colors 0xRRGGBB). */
+    var paletteStops by mutableStateOf(Palettes.toStops(flame.palette))
+        private set
+
     // export render state
     var exportProgress by mutableStateOf<Float?>(null)
         private set
@@ -76,8 +88,11 @@ class FlameViewModel(app: Application) : AndroidViewModel(app) {
     var canUndo by mutableStateOf(false); private set
     var canRedo by mutableStateOf(false); private set
 
-    private var renderJob: Job? = null
-    private var renderer: Renderer? = null
+    // preview loop state
+    private val previewRequests = MutableStateFlow(0)
+    @Volatile private var refiningRenderer: Renderer? = null
+    private var lastInteraction = 0L
+    @Volatile private var paused = false
 
     // ---------------------------------------------------------------- editing
 
@@ -92,6 +107,7 @@ class FlameViewModel(app: Application) : AndroidViewModel(app) {
         val now = System.currentTimeMillis()
         if (!coalesce || now - lastUndoPush > 700) pushUndo()
         lastUndoPush = now
+        if (coalesce) lastInteraction = now
         block(flame)
         changed()
     }
@@ -120,7 +136,10 @@ class FlameViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun afterReplace(resetPaletteBase: Boolean) {
-        if (resetPaletteBase) { paletteBase = flame.palette.copyOf(); paletteShift = 0 }
+        if (resetPaletteBase) {
+            paletteBase = flame.palette.copyOf(); paletteShift = 0
+            paletteStops = Palettes.toStops(flame.palette)
+        }
         if (selected >= flame.xforms.size) selected = flame.xforms.size - 1
         if (selected == -1 && flame.finalXform == null) selected = 0
         updateUndoFlags()
@@ -129,7 +148,7 @@ class FlameViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun changed() {
         revision++
-        restartPreview()
+        requestPreview()
         scheduleAutosave()
     }
 
@@ -193,7 +212,18 @@ class FlameViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     // ---- palette
-    fun setPalette(p: IntArray) = edit { paletteBase = p.copyOf(); paletteShift = 0; it.palette = p.copyOf() }
+    fun setPalette(p: IntArray) = edit {
+        paletteBase = p.copyOf(); paletteShift = 0; it.palette = p.copyOf()
+        paletteStops = Palettes.toStops(p)
+    }
+
+    /** Replace the custom gradient stops and apply them. */
+    fun setStops(stops: List<Palettes.Stop>, coalesce: Boolean = false) = edit(coalesce) {
+        paletteStops = stops
+        paletteBase = Palettes.fromStops(stops)
+        paletteShift = 0
+        it.palette = paletteBase.copyOf()
+    }
 
     fun changePaletteShift(s: Int) = edit(coalesce = true) { paletteShift = s; it.palette = Palettes.shifted(paletteBase, s) }
 
@@ -216,39 +246,81 @@ class FlameViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     // ---------------------------------------------------------------- preview rendering
+    //
+    // One long-lived loop renders the preview. While the user drags a slider or the preview,
+    // it shows quick low-resolution frames (capped at ~30 fps) instead of restarting a full
+    // render on every tick. Once input stops it refines progressively and then goes idle,
+    // so the phone isn't kept at full load.
 
-    private fun previewSize(): Pair<Int, Int> {
-        val long = if (highQualityPreview) 1080 else 640
+    /** Fewer threads than cores for the preview: most of the speed, much less heat. */
+    private val previewThreads = ((RenderPool.cores + 1) / 2).coerceIn(1, 4)
+
+    private fun previewSize(long: Int): Pair<Int, Int> {
         val f = flame
         return if (f.width >= f.height) long to max(1, (long.toDouble() * f.height / f.width).roundToInt())
         else max(1, (long.toDouble() * f.width / f.height).roundToInt()) to long
     }
 
-    fun restartPreview() {
-        renderer?.cancel()
-        renderJob?.cancel()
-        val snapshot = flame.deepCopy()
-        val (w, h) = previewSize()
-        renderJob = viewModelScope.launch(Dispatchers.Default) {
-            delay(16) // let rapid edits collapse
-            val r = Renderer(snapshot, w, h)
-            renderer = r
-            val pixels = IntArray(w * h)
+    private fun requestPreview() {
+        previewRequests.value = previewRequests.value + 1
+        refiningRenderer?.cancel() // a newer edit makes the current refinement pointless
+    }
+
+    fun restartPreview() = requestPreview()
+
+    /** Called from the activity: stop background rendering while the app isn't visible. */
+    fun setPaused(p: Boolean) {
+        paused = p
+        if (p) refiningRenderer?.cancel() else requestPreview()
+    }
+
+    private suspend fun publish(r: Renderer, w: Int, h: Int, spp: Double) {
+        val bmp = Bitmap.createBitmap(r.toArgb(), w, h, Bitmap.Config.ARGB_8888).asImageBitmap()
+        withContext(Dispatchers.Main) { preview = bmp; previewSpp = spp.toFloat() }
+    }
+
+    private fun startPreviewLoop() = viewModelScope.launch(Dispatchers.Default) {
+        var rendered = -1
+        while (isActive) {
+            val req = previewRequests.first { it != rendered }
+            rendered = req
+            if (paused) continue
+            val snap = withContext(Dispatchers.Main) {
+                PreviewSnap(
+                    flame.deepCopy(),
+                    System.currentTimeMillis() - lastInteraction < 250,
+                    highQualityPreview,
+                    previewSize(360),
+                    previewSize(if (highQualityPreview) 1080 else 720)
+                )
+            }
+            if (snap.interactive) {
+                val t0 = System.currentTimeMillis()
+                val (qw, qh) = snap.quick
+                val q = Renderer(snap.flame, qw, qh, previewThreads)
+                q.addSamples(q.samplesFor(2.0))
+                publish(q, qw, qh, 2.0)
+                val spare = 33 - (System.currentTimeMillis() - t0)
+                if (spare > 0) delay(spare)
+                // keep showing quick frames while input continues; refine once it settles
+                val next = withTimeoutOrNull(250) { previewRequests.first { it != req } }
+                if (next != null) continue
+            }
+            val (w, h) = snap.full
+            val r = Renderer(snap.flame, w, h, previewThreads)
+            refiningRenderer = r
             try {
-                val steps = if (highQualityPreview) doubleArrayOf(0.5, 2.0, 6.0, 15.0, 40.0, 100.0, 200.0)
-                else doubleArrayOf(0.5, 2.0, 6.0, 15.0, 40.0)
+                val steps = if (snap.hq) doubleArrayOf(0.5, 2.0, 6.0, 15.0, 40.0, 100.0, 200.0)
+                else doubleArrayOf(0.5, 2.0, 6.0, 15.0, 35.0)
                 var done = 0.0
                 for (spp in steps) {
-                    if (!isActive) break
+                    if (previewRequests.value != req || paused) break
                     if (!r.addSamples(r.samplesFor(spp - done))) break
                     done = spp
-                    r.toArgb(pixels)
-                    val bmp = Bitmap.createBitmap(pixels, w, h, Bitmap.Config.ARGB_8888).asImageBitmap()
-                    withContext(Dispatchers.Main) {
-                        if (isActive) { preview = bmp; previewSpp = spp.toFloat() }
-                    }
+                    publish(r, w, h, spp)
                 }
             } finally {
+                refiningRenderer = null
                 r.shutdown()
             }
         }
@@ -261,7 +333,7 @@ class FlameViewModel(app: Application) : AndroidViewModel(app) {
         val snapshot = flame.deepCopy()
         exportProgress = 0f
         exportJob = viewModelScope.launch(Dispatchers.Default) {
-            val r = try { Renderer(snapshot, width, height) } catch (e: OutOfMemoryError) {
+            val r = try { Renderer(snapshot, width, height, RenderPool.cores) } catch (e: OutOfMemoryError) {
                 withContext(Dispatchers.Main) { exportProgress = null; message = "Not enough memory for ${width}×$height" }
                 return@launch
             }
@@ -373,11 +445,20 @@ class FlameViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun scheduleAutosave() {
         autosaveJob?.cancel()
-        val xml = FlameXml.write(listOf(flame))
-        autosaveJob = viewModelScope.launch(Dispatchers.IO) {
-            delay(1500)
-            try { autosaveFile.writeText(xml) } catch (_: Exception) {}
+        autosaveJob = viewModelScope.launch {
+            delay(2000) // only after edits settle
+            val xml = FlameXml.write(listOf(flame))
+            withContext(Dispatchers.IO) { try { autosaveFile.writeText(xml) } catch (_: Exception) {} }
         }
+    }
+
+    private fun starterFlame(): Flame = Flame().apply {
+        width = 1080; height = 1350
+        listOf(0.0 to -0.5, -0.5 to 0.4, 0.5 to 0.4).forEach { (x, y) ->
+            xforms += XForm().apply { scale(0.5); c20 = x; c21 = y; addVariation("linear", 1.0) }
+        }
+        distributeColors()
+        RandomFlame.autoFit(this, 1)
     }
 
     private fun loadAutosave(): Flame? = try {
@@ -387,11 +468,20 @@ class FlameViewModel(app: Application) : AndroidViewModel(app) {
 
     // Must come after all property initializers (they run in declaration order).
     init {
-        restartPreview()
+        startPreviewLoop()
+        requestPreview()
+        if (restored == null) randomFlameFirst()
+    }
+
+    /** First launch: generate a random flame off the main thread, without an undo step. */
+    private fun randomFlameFirst() = viewModelScope.launch {
+        val f = withContext(Dispatchers.Default) { RandomFlame.generate(RandomFlame.Style.MIXED, 1080, 1350) }
+        flame = f
+        afterReplace(resetPaletteBase = true)
     }
 
     override fun onCleared() {
-        renderer?.cancel()
+        refiningRenderer?.cancel()
         exportRenderer?.cancel()
         super.onCleared()
     }

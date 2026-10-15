@@ -19,6 +19,33 @@ object Palettes {
         return out
     }
 
+    /** A color stop in a user-edited gradient: [pos] in 0..1, [color] as 0xRRGGBB. */
+    data class Stop(val pos: Double, val color: Int)
+
+    /** Build a 256-entry gradient from freely positioned stops (sorted by position). */
+    fun fromStops(stops: List<Stop>): IntArray {
+        if (stops.isEmpty()) return IntArray(256) { 0xFF000000.toInt() }
+        val s = stops.sortedBy { it.pos }
+        return IntArray(256) { i ->
+            val t = i / 255.0
+            when {
+                t <= s.first().pos -> s.first().color or (0xFF shl 24)
+                t >= s.last().pos -> s.last().color or (0xFF shl 24)
+                else -> {
+                    var k = 0
+                    while (k < s.size - 2 && t > s[k + 1].pos) k++
+                    val a = s[k]; val b = s[k + 1]
+                    val span = b.pos - a.pos
+                    lerp(a.color, b.color, if (span <= 0) 0.0 else (t - a.pos) / span)
+                }
+            }
+        }
+    }
+
+    /** Approximate any palette with [n] evenly spaced stops, as a starting point for editing. */
+    fun toStops(p: IntArray, n: Int = 5): List<Stop> =
+        List(n) { k -> val pos = k / (n - 1.0); Stop(pos, p[(pos * 255).toInt()] and 0xFFFFFF) }
+
     private fun lerp(a: Int, b: Int, f: Double): Int {
         val r = ((a shr 16 and 255) + ((b shr 16 and 255) - (a shr 16 and 255)) * f).toInt()
         val g = ((a shr 8 and 255) + ((b shr 8 and 255) - (a shr 8 and 255)) * f).toInt()

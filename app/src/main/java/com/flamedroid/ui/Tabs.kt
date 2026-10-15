@@ -58,6 +58,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableDoubleStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -84,6 +85,7 @@ import kotlin.math.max
 
 @Composable
 fun XFormSelector(vm: FlameViewModel) {
+    @Suppress("UNUSED_VARIABLE") val rev = vm.revision // re-read on every edit
     val f = vm.flame
     FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         f.xforms.forEachIndexed { i, x ->
@@ -144,6 +146,13 @@ fun TransformsTab(vm: FlameViewModel) {
     }
     CoefficientRow(vm, x, post)
 
+    key(x) { TransformSliders(vm, x, isFinal) }
+    Spacer(Modifier.heightIn(min = 24.dp))
+}
+
+@Composable
+private fun TransformSliders(vm: FlameViewModel, x: XForm, isFinal: Boolean) {
+    @Suppress("UNUSED_VARIABLE") val rev = vm.revision // re-read on every edit
     SectionTitle("Transform")
     if (!isFinal) ValueSlider("Weight", x.weight, 0.0..3.0, { v -> vm.edit(true) { x.weight = max(0.0, v) } })
     ValueSlider("Color", x.color, 0.0..1.0, { v -> vm.edit(true) { x.color = v.coerceIn(0.0, 1.0) } })
@@ -163,11 +172,11 @@ fun TransformsTab(vm: FlameViewModel) {
             })
         }
     }
-    Spacer(Modifier.heightIn(min = 24.dp))
 }
 
 @Composable
 private fun CoefficientRow(vm: FlameViewModel, x: XForm, post: Boolean) {
+    @Suppress("UNUSED_VARIABLE") val rev = vm.revision // re-read on every edit
     var edit by remember { mutableStateOf<Int?>(null) }
     val vals = if (post) doubleArrayOf(x.p00, x.p01, x.p10, x.p11, x.p20, x.p21) else doubleArrayOf(x.c00, x.c01, x.c10, x.c11, x.c20, x.c21)
     val names = listOf("a", "d", "b", "e", "c", "f")
@@ -198,7 +207,8 @@ private fun CoefficientRow(vm: FlameViewModel, x: XForm, post: Boolean) {
 /** JWildfire-style triangle view: every transform's affine drawn as a triangle O–X–Y. */
 @Composable
 private fun TriangleEditor(vm: FlameViewModel, post: Boolean, modifier: Modifier) {
-    @Suppress("UNUSED_VARIABLE") val rev = vm.revision
+    val rev = vm.revision
+    val sel = vm.selected
     val f = vm.flame
     val current by rememberUpdatedState(vm)
     val primary = MaterialTheme.colorScheme.primary
@@ -216,6 +226,9 @@ private fun TriangleEditor(vm: FlameViewModel, post: Boolean, modifier: Modifier
                 }
             }
     ) {
+        // Reading rev and the selection here makes the drawing change identity on every edit;
+        // otherwise Compose reuses the cached drawing and the triangle appears frozen.
+        if (rev < 0 || sel < -1) return@Canvas
         val unit = size.height / 4f
         val cx = size.width / 2f
         val cy = size.height / 2f
@@ -225,17 +238,17 @@ private fun TriangleEditor(vm: FlameViewModel, post: Boolean, modifier: Modifier
         for (k in -2..2) drawLine(grid, p(-4.0, k.toDouble()), p(4.0, k.toDouble()), strokeWidth = if (k == 0) 2f else 1f)
         val all = f.xforms.mapIndexed { i, x -> i to x } + listOfNotNull(f.finalXform?.let { -1 to it })
         all.forEach { (i, x) ->
-            val sel = i == vm.selected
+            val isSel = i == sel
             val ox = if (post) x.p20 else x.c20; val oy = if (post) x.p21 else x.c21
             val ax = if (post) x.p00 else x.c00; val ay = if (post) x.p01 else x.c01
             val bx = if (post) x.p10 else x.c10; val by = if (post) x.p11 else x.c11
             val o = p(ox, oy); val xp = p(ox + ax, oy + ay); val yp = p(ox + bx, oy + by)
             val path = Path().apply { moveTo(o.x, o.y); lineTo(xp.x, xp.y); lineTo(yp.x, yp.y); close() }
-            val col = if (sel) primary else dim
-            drawPath(path, col.copy(alpha = if (sel) 0.18f else 0.06f))
-            drawPath(path, col, style = Stroke(width = if (sel) 3f else 1.5f,
+            val col = if (isSel) primary else dim
+            drawPath(path, col.copy(alpha = if (isSel) 0.18f else 0.06f))
+            drawPath(path, col, style = Stroke(width = if (isSel) 3f else 1.5f,
                 pathEffect = if (i == -1) PathEffect.dashPathEffect(floatArrayOf(10f, 8f)) else null))
-            if (sel) {
+            if (isSel) {
                 drawCircle(primary, 6f, o)
                 drawCircle(Color(0xFFFFD36B), 5f, xp)
                 drawCircle(Color(0xFF7FE3F0), 5f, yp)
@@ -258,7 +271,7 @@ fun VariationsTab(vm: FlameViewModel) {
         Text("${Variations.names.size} available", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
     if (x.variations.isEmpty()) Text("No variations — this transform does nothing yet.", modifier = Modifier.padding(top = 12.dp))
-    x.variations.toList().forEachIndexed { idx, e ->
+    x.variations.toList().forEachIndexed { idx, e -> key(e) {
         Card(
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
             modifier = Modifier.fillMaxWidth().padding(top = 10.dp)
@@ -278,7 +291,7 @@ fun VariationsTab(vm: FlameViewModel) {
                 }
             }
         }
-    }
+    } }
     Spacer(Modifier.heightIn(min = 24.dp))
     if (picking) VariationPicker(onDismiss = { picking = false }) { name ->
         picking = false

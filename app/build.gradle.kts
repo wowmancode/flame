@@ -33,6 +33,13 @@ android {
     packaging { resources { excludes += "/META-INF/{AL2.0,LGPL2.1}" } }
 }
 
+// The UI edits a plain mutable Flame object and signals changes through a revision counter.
+// Strong skipping would cache composables/lambdas whose captured objects didn't change
+// identity, leaving sliders and the triangle view stale, so it is turned off.
+composeCompiler {
+    featureFlags = setOf(org.jetbrains.kotlin.compose.compiler.gradle.ComposeFeatureFlag.StrongSkipping.disabled())
+}
+
 dependencies {
     implementation(project(":engine"))
 

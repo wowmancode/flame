@@ -21,6 +21,16 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onStart() {
+        super.onStart()
+        vm.setPaused(false)
+    }
+
+    override fun onStop() {
+        vm.setPaused(true) // no background rendering heat while the app is hidden
+        super.onStop()
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         handleIntent(intent)
